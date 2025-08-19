@@ -1,0 +1,1 @@
+[0:v] format=yuv420p,drawbox=x=0:y=h-340:w=iw:h=320:color=black@0.65:t=fill,drawtext=fontfile='Poppins-Black.ttf':text='This':enable='between(t,0.000,0.232)':x=(w-tw)/2:y=h-260:fontsize=54:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=20,[v]

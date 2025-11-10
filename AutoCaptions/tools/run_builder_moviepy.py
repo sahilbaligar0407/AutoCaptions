@@ -67,7 +67,7 @@ def detect_fonts():
     return fonts
 
 def get_wow_words():
-    """Get list of 'wow' words that should use Poppins-ExtraBold font"""
+    """Get list of 'wow' words that should use Poppins-ExtraBold font with special colors"""
     return {
         'wow', 'shocking', 'unbelievable', 'insane', 'crazy', 'secret', 'revealed', 
         'exclusive', 'viral', 'legendary', 'epic', 'mind-blowing', 'unreal', 'amazing', 
@@ -77,7 +77,16 @@ def get_wow_words():
         'proven', 'official', 'first', 'last', 'limited', 'challenge', 'dare', 
         'trending', 'for-you', 'now', 'right-now', 'today', 'instantly', 'fast', 
         'quick', 'easy', 'free', 'win', 'lose', 'fail', 'success', 'power', 'boost', 
-        'unlock', 'behind-the-scenes', 'true-story', 'real-life', 'fact', 'secret-sauce'
+        'unlock', 'behind-the-scenes', 'true-story', 'real-life', 'fact', 'secret-sauce',
+        'gosh', 'holy', 'damn', 'heck', 'jeez', 'whoa'
+    }
+
+def get_italic_words():
+    """Get list of words that should be italicized"""
+    return {
+        'like', 'feel', 'think', 'seem', 'appear', 'look', 'sound', 'taste', 'smell',
+        'maybe', 'perhaps', 'possibly', 'probably', 'might', 'could', 'would', 'should',
+        'almost', 'nearly', 'about', 'around', 'roughly', 'approximately'
     }
 
 def get_next_version(output_dir: str, base_name: str = "Clip_MoviePy_V"):
@@ -187,33 +196,46 @@ def run_moviepy_builder(video_path: str, subtitle_path: str, output_path: str, l
         logger.info("Loading video...")
         video = VideoFileClip(video_path)
         
-        # Create text clips with layered multi-font support
-        logger.info("Creating layered multi-font text clips with non-overlapping timing...")
+        # Create text clips with styled fonts and colors
+        logger.info("Creating styled text clips with dynamic font/color based on content...")
         text_clips = []
-        
-        # Get wow words and fonts
-        wow_words = get_wow_words()
         
         # Find actual font file paths - use absolute paths to avoid issues
         script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         font_dirs = ['.', 'AutoCaptions', os.path.join(script_dir, 'AutoCaptions'), 
                      os.path.join('AutoCaptions'), 'outputs', os.path.join('AutoCaptions', 'outputs')]
         
+        # Detect all available fonts for styling
         black_font = None
+        bold_font = None
         extrabold_font = None
+        blackitalic_font = None
+        bolditalic_font = None
         
         for font_dir in font_dirs:
             black_path = os.path.join(font_dir, 'Poppins-Black.ttf')
+            bold_path = os.path.join(font_dir, 'Poppins-Bold.ttf')
             extrabold_path = os.path.join(font_dir, 'Poppins-ExtraBold.ttf')
+            blackitalic_path = os.path.join(font_dir, 'Poppins-BlackItalic.ttf')
+            bolditalic_path = os.path.join(font_dir, 'Poppins-BoldItalic.ttf')
             
             if black_font is None and os.path.exists(black_path):
-                # Convert to absolute path to avoid any path issues
                 black_font = os.path.abspath(black_path) if not os.path.isabs(black_path) else black_path
+            if bold_font is None and os.path.exists(bold_path):
+                bold_font = os.path.abspath(bold_path) if not os.path.isabs(bold_path) else bold_path
             if extrabold_font is None and os.path.exists(extrabold_path):
                 extrabold_font = os.path.abspath(extrabold_path) if not os.path.isabs(extrabold_path) else extrabold_path
+            if blackitalic_font is None and os.path.exists(blackitalic_path):
+                blackitalic_font = os.path.abspath(blackitalic_path) if not os.path.isabs(blackitalic_path) else blackitalic_path
+            if bolditalic_font is None and os.path.exists(bolditalic_path):
+                bolditalic_font = os.path.abspath(bolditalic_path) if not os.path.isabs(bolditalic_path) else bolditalic_path
         
         # Sort specs by start time to ensure proper sequencing
         sorted_specs = sorted(text_clips_specs, key=lambda x: x['start_time'])
+        
+        # Get word lists for styling
+        wow_words = get_wow_words()
+        italic_words = get_italic_words()
         
         def detect_wow_words_in_text(text, wow_words):
             """Detect wow words and their positions in text"""
@@ -224,6 +246,53 @@ def run_moviepy_builder(video_path: str, subtitle_path: str, output_path: str, l
                 if clean_word in wow_words:
                     wow_positions.append((i, word, clean_word))
             return wow_positions
+        
+        def detect_italic_words_in_text(text, italic_words):
+            """Detect italic words in text"""
+            words = text.split()
+            for word in words:
+                clean_word = word.lower().strip('.,!?;:')
+                if clean_word in italic_words:
+                    return True
+            return False
+        
+        def determine_caption_style(text, wow_words, italic_words):
+            """Determine font and color style for a caption based on its content"""
+            words = text.split()
+            
+            # Check for wow words first (higher priority)
+            has_wow_word = False
+            for word in words:
+                clean_word = word.lower().strip('.,!?;:')
+                if clean_word in wow_words:
+                    has_wow_word = True
+                    break
+            
+            # Check for italic words
+            has_italic_word = detect_italic_words_in_text(text, italic_words)
+            
+            # Determine style
+            if has_wow_word:
+                # Wow words: ExtraBold font, yellow/gold color
+                return {
+                    'font': extrabold_font if extrabold_font and os.path.exists(extrabold_font) else bold_font if bold_font and os.path.exists(bold_font) else black_font,
+                    'color': 'yellow',  # Bright yellow for wow words
+                    'style': 'wow'
+                }
+            elif has_italic_word:
+                # Italic words: BlackItalic or BoldItalic font
+                return {
+                    'font': blackitalic_font if blackitalic_font and os.path.exists(blackitalic_font) else bolditalic_font if bolditalic_font and os.path.exists(bolditalic_font) else black_font,
+                    'color': 'white',  # White for italic words
+                    'style': 'italic'
+                }
+            else:
+                # Default: Black font, white color
+                return {
+                    'font': black_font,
+                    'color': 'white',
+                    'style': 'default'
+                }
         
         def estimate_word_x_position(text, word_index, font_size=54):
             """Estimate X position of a word in center-aligned text"""
@@ -461,7 +530,13 @@ def run_moviepy_builder(video_path: str, subtitle_path: str, output_path: str, l
                 else:
                     base_y = 1660  # Fallback
                 
-                # Create base clip (all text in Poppins-Black)
+                # Determine caption style based on content (wow words, italic words, etc.)
+                style_info = determine_caption_style(caption_text, wow_words, italic_words)
+                caption_font = style_info['font']
+                caption_color = style_info['color']
+                style_type = style_info['style']
+                
+                # Create styled caption clip with appropriate font and color
                 # Constrain text width to 90% of video width (972px) to prevent clipping
                 # Use method='caption' which handles text rendering properly with margins
                 font_size = spec['font_size']
@@ -485,12 +560,12 @@ def run_moviepy_builder(video_path: str, subtitle_path: str, output_path: str, l
                     # The caption method handles text wrapping and respects margins better
                     # Constrain width to safe area from the start to prevent horizontal clipping
                     try:
-                        if black_font and os.path.exists(black_font):
+                        if caption_font and os.path.exists(caption_font):
                             base_clip = TextClip(
                                 text=caption_text,
-                                font=black_font,
+                                font=caption_font,
                                 font_size=font_size,
-                                color=spec['font_color'],
+                                color=caption_color,
                                 stroke_color='black',
                                 stroke_width=2,
                                 method='caption',  # Use caption method for better text handling
@@ -501,7 +576,7 @@ def run_moviepy_builder(video_path: str, subtitle_path: str, output_path: str, l
                             base_clip = TextClip(
                                 text=caption_text,
                                 font_size=font_size,
-                                color=spec['font_color'],
+                                color=caption_color,
                                 stroke_color='black',
                                 stroke_width=2,
                                 method='caption',  # Use caption method for better text handling
@@ -511,12 +586,12 @@ def run_moviepy_builder(video_path: str, subtitle_path: str, output_path: str, l
                     except Exception as e_caption:
                         # Fallback: If caption method fails, use label method with margin
                         logger.debug(f"Caption method failed for '{caption_text}', trying label: {e_caption}")
-                        if black_font and os.path.exists(black_font):
+                        if caption_font and os.path.exists(caption_font):
                             base_clip = TextClip(
                                 text=caption_text,
-                                font=black_font,
+                                font=caption_font,
                                 font_size=font_size,
-                                color=spec['font_color'],
+                                color=caption_color,
                                 stroke_color='black',
                                 stroke_width=2,
                                 method='label',  # Fallback to label method
@@ -526,7 +601,7 @@ def run_moviepy_builder(video_path: str, subtitle_path: str, output_path: str, l
                             base_clip = TextClip(
                                 text=caption_text,
                                 font_size=font_size,
-                                color=spec['font_color'],
+                                color=caption_color,
                                 stroke_color='black',
                                 stroke_width=2,
                                 method='label',  # Fallback to label method
@@ -564,10 +639,9 @@ def run_moviepy_builder(video_path: str, subtitle_path: str, output_path: str, l
                     base_clip = base_clip.with_start(start_time).with_end(end_time)
                     text_clips.append(base_clip)
                     
-                    # DISABLED: Overlay/layered captions cause double-word visual overlap issues
-                    # Only create base captions - no overlay clips for "wow words"
-                    # This prevents the "LLastGuest" double-word issue
-                    logger.info(f"Created base caption: '{caption_text}' at {start_time:.3f}s to {end_time:.3f}s")
+                    # Log caption creation with style information
+                    style_desc = f"[{style_type}]" if style_type != 'default' else ""
+                    logger.info(f"Created caption {style_desc}: '{caption_text}' at {start_time:.3f}s to {end_time:.3f}s (font: {os.path.basename(caption_font) if caption_font else 'default'}, color: {caption_color})")
                     
                 except Exception as e:
                     logger.error(f"Could not create text clip for '{caption_text}': {e}")

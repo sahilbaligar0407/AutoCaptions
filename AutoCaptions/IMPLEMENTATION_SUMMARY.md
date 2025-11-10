@@ -11,7 +11,6 @@ This project implements a sophisticated algorithm that renders progressive 1-3 w
 1. **`SubtitleParser`** - Unified parser for ASS, SRT, and VTT formats
 2. **`CaptionGenerator`** - 1-3 word caption state generation with timing constraints
 3. **`MoviePyGenerator`** - MoviePy text clip specifications for Python-based rendering
-4. **`FFmpegGenerator`** - FFmpeg filter script generation (optional)
 
 ### Data Flow
 
@@ -129,8 +128,7 @@ python AutoCaptions/tools/run_builder_moviepy.py \
 AutoCaptions/
 ├── progressive_captions.py      # Core algorithm implementation
 ├── tools/
-│   ├── run_builder_moviepy.py  # MoviePy rendering tool
-│   └── run_builder_ffmpeg.py   # FFmpeg rendering tool (optional)
+│   └── run_builder_moviepy.py  # MoviePy rendering tool
 ├── uploads/                     # Input video files
 ├── outputs/                     # Generated captioned videos
 ├── logs/                        # Processing logs

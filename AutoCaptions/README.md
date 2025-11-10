@@ -22,9 +22,6 @@ A sophisticated algorithm that renders progressive 1-3 word captions for 9:16 vi
 ```bash
 # Required Python packages
 pip install moviepy
-
-# Optional: FFmpeg (for alternative rendering)
-# Download from: https://ffmpeg.org/download.html
 ```
 
 ### 2. Prepare Your Files
@@ -50,8 +47,7 @@ The output video will be saved to `outputs/` and logs will be saved to `logs/`.
 AutoCaptions/
 ├── progressive_captions.py      # Core algorithm implementation
 ├── tools/
-│   ├── run_builder_moviepy.py  # MoviePy rendering tool
-│   └── run_builder_ffmpeg.py   # FFmpeg rendering tool (optional)
+│   └── run_builder_moviepy.py  # MoviePy rendering tool
 ├── uploads/                     # Input video files
 ├── outputs/                     # Generated captioned videos
 ├── logs/                        # Processing logs
@@ -253,7 +249,6 @@ done
 - **`SubtitleParser`**: Unified parser for ASS, SRT, and VTT formats
 - **`CaptionGenerator`**: Generates 1-3 word caption states with timing
 - **`MoviePyGenerator`**: Creates MoviePy text clip specifications
-- **`FFmpegGenerator`**: Creates FFmpeg filter scripts (optional)
 
 ### Key Methods
 

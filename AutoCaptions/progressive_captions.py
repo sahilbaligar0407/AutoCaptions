@@ -11,7 +11,6 @@ Core Features:
 - Generates 1-3 word captions that appear as words are spoken
 - Synthesizes word-level timing with constraints
 - Cycles through 1-3 words based on timing (1, 2, 3, 1, 2, 3...)
-- Generates FFmpeg filter scripts for rendering
 - Supports MoviePy text layer generation
 
 Author: AutoCaptions
@@ -384,73 +383,6 @@ class CaptionGenerator:
         return '\n'.join(lines)
 
 
-class FFmpegGenerator:
-    """Generates FFmpeg filter scripts for progressive captions"""
-    
-    def __init__(self, font_file: str = "Poppins-Black.ttf"):
-        self.font_file = font_file
-    
-    def escape_ffmpeg_text(self, text: str) -> str:
-        """Escape text for FFmpeg drawtext filter"""
-        # Escape special characters that need escaping in FFmpeg
-        text = text.replace('\\', '\\\\')
-        text = text.replace(':', '\\:')
-        text = text.replace(',', '\\,')
-        text = text.replace('%', '\\%')
-        text = text.replace('[', '\\[')
-        text = text.replace(']', '\\]')
-        text = text.replace('=', '\\=')
-        text = text.replace('#', '\\#')
-        text = text.replace(';', '\\;')
-        # Escape single quotes used inside drawtext text='...'
-        text = text.replace("'", "\\'")
-        text = text.replace('\n', '\\n')
-        return text
-    
-    def generate_filter_script(self, states: List[CaptionState], 
-                              output_file: str,
-                              video_width: int = 1080,
-                              video_height: int = 1920) -> None:
-        """Generate FFmpeg filter script for progressive captions"""
-        
-        # Build the entire filter as a single line
-        # IMPORTANT: no space between label and first filter
-        filter_parts = ["[0:v]format=yuv420p"]
-        
-        # Add background box
-        filter_parts.append("drawbox=x=0:y=h-340:w=iw:h=320:color=black@0.65:t=fill")
-        
-        # Add all drawtext filters
-        for state in states:
-            if state.skip:
-                continue
-            
-            # Wrap and escape text
-            wrapped_text = CaptionGenerator().wrap_text(state.text)
-            # Replace newlines with spaces for FFmpeg compatibility
-            wrapped_text = wrapped_text.replace('\n', ' ')
-            escaped_text = self.escape_ffmpeg_text(wrapped_text)
-            
-            # Build drawtext filter
-            drawtext_filter = (
-                f"drawtext=fontfile='{self.font_file}':"
-                f"text='{escaped_text}':"
-                f"enable='between(t,{state.on:.3f},{state.off:.3f})':"
-                f"x=(w-tw)/2:y=h-{state.y}:"
-                f"fontsize=54:fontcolor=white:"
-                f"box=1:boxcolor=black@0.6:boxborderw=20"
-            )
-            
-            filter_parts.append(drawtext_filter)
-        
-        # Join all parts with commas and add output label (with a space)
-        filter_string = ",".join(filter_parts) + " [v]"
-        
-        # Write the script as a single line
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(filter_string)
-
-
 class MoviePyGenerator:
     """Generates MoviePy text clips for progressive captions"""
     
@@ -514,12 +446,6 @@ def main():
         if not state.skip:
             print(f"  {i+1}. '{state.text}' | {state.on:.3f}s - {state.off:.3f}s | y={state.y}")
     
-    # Generate FFmpeg filter script
-    print("\nGenerating FFmpeg filter script...")
-    ffmpeg_gen = FFmpegGenerator()
-    ffmpeg_gen.generate_filter_script(states, "filter_script.txt")
-    print("FFmpeg filter script saved to 'filter_script.txt'")
-    
     # Generate MoviePy specifications
     print("Generating MoviePy text clip specifications...")
     moviepy_gen = MoviePyGenerator()
@@ -535,15 +461,12 @@ def main():
     print("\n" + "="*60)
     print("USAGE INSTRUCTIONS")
     print("="*60)
-    print("\n1. FFmpeg (Recommended for production):")
-    print("   ffmpeg -i ClipV1.mp4 -filter_complex_script filter_script.txt \\")
-    print("          -map \"[v]\" -map 0:a -c:a copy output_with_captions.mp4")
-    print("\n2. MoviePy (Python implementation):")
+    print("\n1. MoviePy (Python implementation):")
     print("   Use the specifications in 'moviepy_specs.json' to create text clips")
     print("   and composite them with your video.")
-    print("\n3. Custom timing adjustments:")
-    print("   Modify lead_in_ms, min_visibility_ms, and overlap_ms in CaptionGenerator")
-    print("   to fine-tune the caption behavior.")
+    print("\n2. Custom timing adjustments:")
+    print("   Modify min_visibility_ms, min_words_per_caption, and max_words_per_caption")
+    print("   in CaptionGenerator to fine-tune the caption behavior.")
 
 
 if __name__ == "__main__":

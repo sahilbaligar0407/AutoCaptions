@@ -1,15 +1,19 @@
-# Progressive Builder Captions Algorithm
+# AutoCaptions - 1-3 Word Progressive Captions
 
-A sophisticated algorithm that renders progressive "builder" captions for 9:16 videos with precise timing, auto-wrapping, and professional layout.
+A sophisticated algorithm that renders progressive 1-3 word captions for 9:16 videos with precise timing, auto-wrapping, professional layout, and dynamic styling.
 
 ## 🎯 Features
 
-- **Progressive Word Building**: Captions build up to 5 words, then slide forward one word at a time
-- **Precise Timing**: 180ms lead-in, 120ms minimum visibility, 50ms overlap between states
-- **Smart Layout**: Auto-wrapping within 90% width, center-aligned, dual-level positioning
+- **1-3 Word Captions**: Cycles through 1, 2, 3 word captions as words are spoken
+- **Precise Timing**: 200ms minimum visibility per caption, smart timing based on speech rate
+- **Smart Layout**: Auto-wrapping within 90% width, center-aligned, professional positioning
 - **Multi-Format Support**: Parses ASS, SRT, and VTT subtitle files
-- **Dual Output**: Generates both FFmpeg filter scripts and MoviePy specifications
-- **Professional Styling**: 54px white text with black outline, semi-transparent background
+- **Dynamic Styling**: Automatic font and color styling based on content
+  - **Wow Words** (gosh, last, secret, etc.): ExtraBold font with yellow color
+  - **Italic Words** (like, feel, should, etc.): BlackItalic font with white color
+  - **Default**: Black font with white color
+- **Overlap Prevention**: Intelligent overlap detection and resolution
+- **MoviePy Rendering**: Python-based video rendering with styled captions
 
 ## 🚀 Quick Start
 
@@ -19,106 +23,79 @@ A sophisticated algorithm that renders progressive "builder" captions for 9:16 v
 # Required Python packages
 pip install moviepy
 
-# FFmpeg (for video rendering)
+# Optional: FFmpeg (for alternative rendering)
 # Download from: https://ffmpeg.org/download.html
 ```
 
-### 2. Run the Algorithm
+### 2. Prepare Your Files
+
+Place your video files in the `uploads/` folder and subtitle files (`.ass`, `.srt`, or `.vtt`) in the `subs/` folder (or specify paths directly).
+
+### 3. Run the Caption Generator
 
 ```bash
-# Generate captions from your subtitle file
-python progressive_captions.py
-
-# This will create:
-# - filter_script.txt (FFmpeg filter script)
-# - moviepy_specs.json (MoviePy text clip specifications)
+# Generate captioned video with MoviePy
+python AutoCaptions/tools/run_builder_moviepy.py \
+    --video AutoCaptions/uploads/your_video.mp4 \
+    --subs AutoCaptions/subs/your_subtitles.ass \
+    --out AutoCaptions/outputs/output_video.mp4 \
+    --log AutoCaptions/logs/output_video.log
 ```
 
-### 3. Render with FFmpeg (Recommended)
-
-```bash
-# Apply captions to your video
-ffmpeg -i ClipV1.mp4 -filter_complex_script filter_script.txt \
-       -map "[v]" -map 0:a -c:a copy output_with_captions.mp4
-```
-
-### 4. Render with MoviePy (Python)
-
-```python
-from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip
-import json
-
-# Load video
-video = VideoFileClip("ClipV1.mp4")
-
-# Load caption specifications
-with open("moviepy_specs.json", "r") as f:
-    caption_specs = json.load(f)
-
-# Create text clips
-text_clips = []
-for spec in caption_specs:
-    clip = TextClip(
-        spec['text'],
-        fontsize=spec['font_size'],
-        color=spec['font_color'],
-        font=spec['font_file']
-    ).set_position(spec['position']).set_duration(
-        spec['end_time'] - spec['start_time']
-    ).set_start(spec['start_time'])
-    
-    text_clips.append(clip)
-
-# Composite and render
-final_video = CompositeVideoClip([video] + text_clips)
-final_video.write_videofile("output_with_captions.mp4")
-```
+The output video will be saved to `outputs/` and logs will be saved to `logs/`.
 
 ## 📁 File Structure
 
 ```
 AutoCaptions/
-├── progressive_captions.py      # Main algorithm implementation
-├── test_example.py             # Test script with example
-├── PROGRESSIVE_CAPTIONS_SPEC.md # Detailed specification
+├── progressive_captions.py      # Core algorithm implementation
+├── tools/
+│   ├── run_builder_moviepy.py  # MoviePy rendering tool
+│   └── run_builder_ffmpeg.py   # FFmpeg rendering tool (optional)
+├── uploads/                     # Input video files
+├── outputs/                     # Generated captioned videos
+├── logs/                        # Processing logs
+├── subs/                        # Subtitle files (.ass, .srt, .vtt)
+├── Poppins-Black.ttf           # Default font
+├── Poppins-Bold.ttf            # Bold font variant
+├── Poppins-ExtraBold.ttf       # ExtraBold font for wow words
+├── Poppins-BlackItalic.ttf     # Italic font for italic words
+├── Poppins-BoldItalic.ttf      # BoldItalic font variant
 ├── README.md                   # This file
-├── filter_script.txt           # Generated FFmpeg filter script
-├── moviepy_specs.json         # Generated MoviePy specifications
-├── ClipV1.mp4                 # Your video file
-├── *.ass, *.srt, *.vtt        # Subtitle files
-└── *.ttf                      # Font files
+├── PROGRESSIVE_CAPTIONS_SPEC.md # Detailed specification
+├── IMPLEMENTATION_SUMMARY.md   # Implementation details
+└── LICENSE                     # License file
 ```
 
 ## ⚙️ Configuration
 
 ### Timing Parameters
 
+The caption generator uses the following default parameters:
+
 ```python
 generator = CaptionGenerator(
-    lead_in_ms=180,        # Lead-in time in milliseconds
-    min_visibility_ms=120, # Minimum visibility per state
-    overlap_ms=50,         # Overlap between states
-    max_words=5            # Maximum words in sliding window
+    min_visibility_ms=200,      # Minimum 200ms visibility per caption
+    min_words_per_caption=1,    # Minimum 1 word per caption
+    max_words_per_caption=3     # Maximum 3 words per caption
 )
 ```
 
-### Layout Parameters
+### Styling Configuration
 
-```python
-# Video dimensions (9:16 aspect ratio)
-video_width = 1080
-video_height = 1920
+**Wow Words** (yellow, ExtraBold):
+- Words like: gosh, last, secret, revealed, exclusive, viral, epic, amazing, incredible, etc.
+- Font: Poppins-ExtraBold.ttf
+- Color: Yellow
 
-# Caption positioning
-primary_y = 260    # Primary caption y-offset from bottom
-secondary_y = 320  # Secondary caption y-offset from bottom
-caption_height = 320  # Background box height
+**Italic Words** (white, Italic):
+- Words like: like, feel, think, seem, maybe, perhaps, probably, might, could, should, etc.
+- Font: Poppins-BlackItalic.ttf or Poppins-BoldItalic.ttf
+- Color: White
 
-# Text formatting
-font_size = 54
-max_chars_per_line = 28
-safe_width_ratio = 0.9  # 90% of video width
-```
+**Default Captions** (white, Black):
+- Font: Poppins-Black.ttf
+- Color: White
 
 ## 🔧 How It Works
 
@@ -130,22 +107,28 @@ safe_width_ratio = 0.9  # 90% of video width
 ### 2. Word Timing Synthesis
 - Splits text into individual words
 - Synthesizes uniform word timings with constraints
-- Enforces minimum 120ms per word
+- Enforces minimum 200ms per word group
 - Clamps to segment boundaries
 
 ### 3. Caption State Generation
-- Creates sliding 5-word window captions
-- Applies 180ms lead-in (capped at segment start)
-- Ensures 50ms overlap between consecutive states
-- Maintains minimum 120ms visibility per state
+- Cycles through 1-3 word captions (1, 2, 3, 1, 2, 3...)
+- Adjusts word count based on speech rate
+- Applies timing constraints
+- Maintains minimum 200ms visibility per caption
 
 ### 4. Layout & Level Assignment
 - **Primary Level**: y = h-260 (260px from bottom)
 - **Secondary Level**: y = h-320 (320px from bottom)
-- Handles overlapping captions with dual-level layout
-- Skips captions with >2 overlaps
+- Handles overlapping captions with level assignment
+- Skips captions that would cause visual overlaps
 
-### 5. Text Wrapping
+### 5. Dynamic Styling
+- Detects wow words and applies ExtraBold font with yellow color
+- Detects italic words and applies Italic font with white color
+- Applies default styling to regular captions
+- Styles entire 1-3 word caption groups for clean appearance
+
+### 6. Text Wrapping
 - Soft-wraps text to maximum 28 characters per line
 - Maintains 90% width safety margin
 - Center-aligned in rendering layer
@@ -154,121 +137,113 @@ safe_width_ratio = 0.9  # 90% of video width
 
 **Input**: "This room is like a red carpet Hollywood hallway." (9 words)
 
-**Generated States**:
-1. "This" (0.000s - 0.232s)
-2. "This room" (0.102s - 0.513s) 
-3. "This room is" (0.383s - 0.795s)
-4. "This room is like" (0.665s - 1.077s)
-5. "This room is like a" (0.947s - 1.358s)
-6. "room is like a red" (1.228s - 1.640s)
-7. "is like a red carpet" (1.510s - 1.922s)
-8. "like a red carpet Hollywood" (1.792s - 2.203s)
-9. "a red carpet Hollywood hallway." (2.073s - 2.535s)
+**Generated Captions**:
+1. "This" (1 word, default style)
+2. "room is" (2 words, default style)
+3. "like a" (2 words, italic style - contains "like")
+4. "red carpet" (2 words, default style)
+5. "Hollywood hallway." (2 words, default style)
+
+Note: The actual output depends on timing and speech rate, cycling through 1-3 words.
 
 ## 🎨 Visual Features
 
-- **Background**: 320px height semi-transparent black box (65% opacity)
-- **Text**: 54px white text with black outline (20px border width)
+- **Background**: Semi-transparent black box (if using background)
+- **Text**: 54px text with black outline (2px stroke)
 - **Positioning**: Center-aligned horizontally, dual-level vertically
-- **Font**: Poppins-Black.ttf (with system font fallback)
+- **Fonts**: Poppins font family (Black, Bold, ExtraBold, BlackItalic, BoldItalic)
+- **Colors**: White (default, italic), Yellow (wow words)
 - **Wrapping**: Automatic line breaks at 28 characters
-
-## 🧪 Testing
-
-Run the test script to validate the algorithm:
-
-```bash
-python test_example.py
-```
-
-This will:
-- Test the progressive caption generation
-- Validate timing constraints
-- Check text wrapping
-- Verify level assignment
-- Provide compliance reports
-
-## 📈 Performance
-
-- **Parsing**: O(n) where n = number of subtitle segments
-- **State Generation**: O(m × w) where m = segments, w = words per segment
-- **Level Assignment**: O(s²) where s = number of states
-- **Memory Usage**: ~1-5 MB for typical video caption data
-- **Rendering**: Hardware-accelerated with FFmpeg, CPU-based with MoviePy
+- **Padding**: Generous padding to prevent text clipping
 
 ## 🔍 Troubleshooting
 
 ### Common Issues
 
 1. **Font Not Found**
-   - Ensure Poppins-Black.ttf is in the same directory
-   - Or modify the font path in the code
+   - Ensure Poppins font files are in the AutoCaptions/ directory
+   - The script will fall back to system fonts if Poppins fonts are not found
 
-2. **FFmpeg Command Too Long**
-   - The filter script is automatically written to a file
-   - Use `-filter_complex_script` instead of `-filter_complex`
+2. **Video Not Found**
+   - Check that the video file path is correct
+   - Ensure the video file exists in the uploads/ folder or provide full path
 
-3. **Timing Issues**
+3. **Subtitle File Not Found**
+   - Check that the subtitle file path is correct
+   - Ensure the subtitle file exists and is in a supported format (.ass, .srt, .vtt)
+
+4. **Timing Issues**
    - Check subtitle file format and encoding
    - Verify start/end times are valid
-   - Adjust timing parameters if needed
+   - Check logs for timing warnings
 
-4. **Text Overflow**
-   - Reduce `max_chars_per_line` parameter
-   - Check font size and video dimensions
+5. **Text Overflow**
+   - Text is automatically wrapped at 28 characters
+   - Check logs for width warnings
+   - Adjust font size if needed (default: 54px)
+
+6. **Caption Overlaps**
+   - The system automatically detects and resolves overlaps
+   - Check logs for overlap detection messages
+   - Some captions may be skipped to prevent visual overlaps
 
 ### Debug Mode
 
-Enable verbose output by modifying the main script:
+Enable verbose logging by checking the log file:
 
-```python
-# Add debug logging
-import logging
-logging.basicConfig(level=logging.DEBUG)
+```bash
+# View log file
+cat AutoCaptions/logs/output_video.log
 ```
 
 ## 🚀 Advanced Usage
 
-### Custom Subtitle Processing
+### Custom Timing Parameters
+
+You can modify the timing parameters in `progressive_captions.py`:
 
 ```python
-from progressive_captions import SubtitleParser, CaptionGenerator
-
-# Parse custom subtitle file
-segments = SubtitleParser.parse_subtitles("my_subtitles.srt")
-
-# Custom timing parameters
 generator = CaptionGenerator(
-    lead_in_ms=200,        # 200ms lead-in
-    min_visibility_ms=150, # 150ms minimum visibility
-    overlap_ms=75,         # 75ms overlap
-    max_words=6            # 6-word sliding window
+    min_visibility_ms=250,      # Increase minimum visibility
+    min_words_per_caption=1,    # Keep minimum 1 word
+    max_words_per_caption=3     # Keep maximum 3 words
 )
+```
 
-# Generate states for specific time range
-states = generator.generate_states(segments, clip_start=10.0, clip_end=30.0)
+### Custom Styling
+
+Modify the wow words and italic words lists in `tools/run_builder_moviepy.py`:
+
+```python
+def get_wow_words():
+    """Get list of 'wow' words that should use Poppins-ExtraBold font with special colors"""
+    return {
+        'wow', 'shocking', 'unbelievable', 'insane', 'crazy', ...
+        # Add your own wow words here
+    }
+
+def get_italic_words():
+    """Get list of words that should be italicized"""
+    return {
+        'like', 'feel', 'think', 'seem', ...
+        # Add your own italic words here
+    }
 ```
 
 ### Batch Processing
 
-```python
-import glob
+Process multiple videos with a script:
 
-# Process multiple subtitle files
-subtitle_files = glob.glob("*.ass") + glob.glob("*.srt") + glob.glob("*.vtt")
-
-for subtitle_file in subtitle_files:
-    print(f"Processing {subtitle_file}...")
-    
-    # Parse and generate captions
-    segments = SubtitleParser.parse_subtitles(subtitle_file)
-    generator = CaptionGenerator()
-    states = generator.generate_states(segments)
-    
-    # Generate output files
-    output_name = f"captions_{os.path.splitext(subtitle_file)[0]}"
-    ffmpeg_gen = FFmpegGenerator()
-    ffmpeg_gen.generate_filter_script(states, f"{output_name}_filter.txt")
+```bash
+#!/bin/bash
+for video in AutoCaptions/uploads/*.mp4; do
+    basename=$(basename "$video" .mp4)
+    python AutoCaptions/tools/run_builder_moviepy.py \
+        --video "$video" \
+        --subs "AutoCaptions/subs/${basename}.ass" \
+        --out "AutoCaptions/outputs/${basename}_captioned.mp4" \
+        --log "AutoCaptions/logs/${basename}.log"
+done
 ```
 
 ## 📚 API Reference
@@ -276,24 +251,31 @@ for subtitle_file in subtitle_files:
 ### Core Classes
 
 - **`SubtitleParser`**: Unified parser for ASS, SRT, and VTT formats
-- **`CaptionGenerator`**: Generates progressive caption states with timing
-- **`FFmpegGenerator`**: Creates FFmpeg filter scripts
-- **`MoviePyGenerator`**: Generates MoviePy text clip specifications
+- **`CaptionGenerator`**: Generates 1-3 word caption states with timing
+- **`MoviePyGenerator`**: Creates MoviePy text clip specifications
+- **`FFmpegGenerator`**: Creates FFmpeg filter scripts (optional)
 
 ### Key Methods
 
 - **`parse_subtitles(file_path)`**: Parse any subtitle format
 - **`generate_states(segments, clip_start, clip_end)`**: Generate caption states
 - **`assign_caption_levels(states)`**: Assign vertical positioning
-- **`generate_filter_script(states, output_file)`**: Create FFmpeg script
 - **`generate_text_clips(states)`**: Create MoviePy specifications
+
+## 📈 Performance
+
+- **Parsing**: O(n) where n = number of subtitle segments
+- **State Generation**: O(m × w) where m = segments, w = words per segment
+- **Level Assignment**: O(s²) where s = number of states
+- **Memory Usage**: ~1-5 MB for typical video caption data
+- **Rendering**: CPU-based with MoviePy (can be slow for long videos)
 
 ## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Implement your changes
-4. Add tests
+4. Test with sample videos
 5. Submit a pull request
 
 ## 📄 License
@@ -302,7 +284,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🙏 Acknowledgments
 
-- **FFmpeg**: For powerful video processing capabilities
 - **MoviePy**: For Python-based video editing
 - **Poppins Font**: For beautiful typography
 - **Subtitle Standards**: ASS, SRT, and VTT format specifications
@@ -312,8 +293,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 For questions, issues, or contributions:
 
 1. Check the troubleshooting section
-2. Review the specification document
-3. Run the test script
+2. Review the specification document (PROGRESSIVE_CAPTIONS_SPEC.md)
+3. Check the logs for error messages
 4. Open an issue on GitHub
 
 ---

@@ -19,11 +19,15 @@ from progressive_captions import SubtitleParser, CaptionGenerator, MoviePyGenera
 
 def setup_logging(log_file: str):
     """Setup logging to both file and console"""
+    # Ensure log directory exists
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    
+    # Use text mode explicitly and ensure proper encoding
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(log_file, mode='w'),
+            logging.FileHandler(log_file, mode='w', encoding='utf-8'),
             logging.StreamHandler(sys.stdout)
         ]
     )
@@ -246,27 +250,210 @@ def run_moviepy_builder(video_path: str, subtitle_path: str, output_path: str, l
             
             return word_x, words[word_index]
         
+        # First pass: Detect and skip shorter captions that are subsets of longer overlapping captions
+        # This prevents issues like "Last" overlapping with "Last Guest" causing visual overlap
+        # We only check captions that actually overlap temporally (not just adjacent)
+        logger.info("Checking for subset caption overlaps...")
+        skip_indices = set()
+        
+        def normalize_text(text):
+            """Normalize text for comparison (lowercase, strip punctuation)"""
+            import re
+            return re.sub(r'[^\w\s]', '', text.lower().strip())
+        
+        def is_subset(shorter_text, longer_text):
+            """Check if shorter_text is a prefix/subset of longer_text"""
+            shorter_norm = normalize_text(shorter_text)
+            longer_norm = normalize_text(longer_text)
+            # Check if shorter is a prefix of longer (allowing for word boundaries)
+            shorter_words = shorter_norm.split()
+            longer_words = longer_norm.split()
+            if len(shorter_words) >= len(longer_words):
+                return False
+            # Check if shorter words match the beginning of longer words
+            return shorter_words == longer_words[:len(shorter_words)]
+        
+        def captions_overlap_temporally(spec1, spec2):
+            """Check if two caption specs overlap temporally"""
+            return not (spec1['end_time'] <= spec2['start_time'] or spec1['start_time'] >= spec2['end_time'])
+        
+        # Check all pairs of captions for subset overlaps
+        for i, spec1 in enumerate(sorted_specs):
+            if i in skip_indices:
+                continue
+            text1 = spec1['text']
+            words1 = len(text1.split())
+            
+            for j, spec2 in enumerate(sorted_specs):
+                if i == j or j in skip_indices:
+                    continue
+                text2 = spec2['text']
+                words2 = len(text2.split())
+                
+                # Only check if captions actually overlap temporally (not just adjacent)
+                if not captions_overlap_temporally(spec1, spec2):
+                    continue
+                
+                # If one caption is shorter and is a subset of the longer one, skip the shorter
+                if words1 < words2 and is_subset(text1, text2):
+                    skip_indices.add(i)
+                    logger.info(f"Skipping shorter caption '{text1}' (index {i}) - it's a subset of overlapping caption '{text2}' (index {j})")
+                    break
+                elif words2 < words1 and is_subset(text2, text1):
+                    skip_indices.add(j)
+                    logger.info(f"Skipping shorter caption '{text2}' (index {j}) - it's a subset of overlapping caption '{text1}' (index {i})")
+        
+        logger.info(f"Marked {len(skip_indices)} captions to skip due to subset overlaps")
+        
+        # Second pass: Group clips by Y position (level), then calculate timings per level
+        # Clips at different Y positions can overlap temporally (different levels)
+        # Clips at the same Y position must NOT overlap (same level)
+        min_duration = 0.120
+        
+        # Group specs by Y position (skip indices that are marked for skipping)
+        specs_by_y = {}
+        for i, spec in enumerate(sorted_specs):
+            if i in skip_indices:
+                continue  # Skip captions marked as subsets
+            if isinstance(spec['position'], tuple) and len(spec['position']) == 2:
+                y_pos = spec['position'][1]
+            else:
+                y_pos = 1660  # Fallback
+            if y_pos not in specs_by_y:
+                specs_by_y[y_pos] = []
+            specs_by_y[y_pos].append((i, spec))  # Store index and spec
+        
+        # Create a mapping from original index to calculated timing as we process
+        timing_map = {}
+        
+        # Process each Y position group and store timings in map
+        # This ensures clips at the same Y position don't overlap
+        # Sort each group by start_time to process in chronological order
+        for y_pos, y_specs in specs_by_y.items():
+            # Sort by start_time to ensure chronological processing
+            y_specs.sort(key=lambda x: x[1]['start_time'])
+            
+            # Single pass: Calculate non-overlapping timings in one forward sweep
+            # This ensures each clip starts AFTER the previous one ends
+            # and ends BEFORE (or at) the next one starts - STRICT NO-OVERLAP GUARANTEE
+            last_clip_end_time = 0.0
+            
+            for i, (idx, spec) in enumerate(y_specs):
+                original_start = spec['start_time']
+                original_end = spec['end_time']
+                
+                # CRITICAL: Start time MUST be >= previous clip's end time (strict - no exceptions)
+                # This ensures no temporal overlap
+                start_time = max(original_start, last_clip_end_time)
+                
+                # Find the next clip's original start time to cap our end time
+                # We look ahead to find the earliest next clip start time
+                next_start_candidates = []
+                for j in range(i + 1, len(y_specs)):
+                    next_idx, next_spec = y_specs[j]
+                    next_start_candidates.append(next_spec['start_time'])
+                
+                # Calculate end time with strict non-overlap guarantee
+                if next_start_candidates:
+                    # Use the earliest next clip start time as maximum end time
+                    # This ensures we don't overlap with ANY future clip
+                    max_end_time = min(next_start_candidates)
+                    min_end_time = start_time + min_duration
+                    
+                    # Check if we can fit minimum duration before next clip starts
+                    if min_end_time > max_end_time:
+                        # Can't fit minimum duration without overlapping - skip this clip
+                        gap = max_end_time - start_time
+                        logger.info(f"Skipping clip {idx} '{spec['text'][:40]}' at Y={y_pos} - cannot fit {min_duration:.3f}s (gap available: {gap:.3f}s) before next clip at {max_end_time:.3f}s")
+                        timing_map[idx] = {
+                            'start_time': start_time,
+                            'end_time': max_end_time,
+                            'skip': True,
+                            'original_start': original_start,
+                            'original_end': original_end
+                        }
+                        # Don't update last_clip_end_time for skipped clips
+                        continue
+                    
+                    # End time: use original_end if it fits, otherwise cap at next clip's start
+                    # But ALWAYS ensure we don't exceed max_end_time
+                    end_time = min(original_end, max_end_time)
+                    # Ensure minimum duration
+                    end_time = max(end_time, min_end_time)
+                    
+                    # FINAL CHECK: Ensure end_time <= max_end_time (next clip's start)
+                    # This is the critical non-overlap guarantee
+                    if end_time > max_end_time:
+                        end_time = max_end_time
+                else:
+                    # Last clip in this Y position - use original end time or minimum duration
+                    end_time = max(original_end, start_time + min_duration)
+                
+                # Final validation: ensure we have valid timing
+                duration = end_time - start_time
+                if duration < min_duration:
+                    # This shouldn't happen given our checks above, but handle it gracefully
+                    logger.warning(f"Skipping clip {idx} '{spec['text'][:40]}' at Y={y_pos} - final duration {duration:.3f}s is less than minimum {min_duration:.3f}s")
+                    timing_map[idx] = {
+                        'start_time': start_time,
+                        'end_time': end_time,
+                        'skip': True,
+                        'original_start': original_start,
+                        'original_end': original_end
+                    }
+                    continue
+                
+                # Store final timing (guaranteed non-overlapping)
+                timing_map[idx] = {
+                    'start_time': start_time,
+                    'end_time': end_time,
+                    'skip': False,
+                    'original_start': original_start,
+                    'original_end': original_end
+                }
+                
+                # Update last clip end time for next iteration
+                # This ensures the next clip starts after this one ends
+                last_clip_end_time = end_time
+                
+                # Log if timing was significantly adjusted from original
+                start_adjusted = abs(start_time - original_start) > 0.01
+                end_adjusted = abs(end_time - original_end) > 0.01
+                if start_adjusted or end_adjusted:
+                    logger.debug(f"Timing adjusted for clip {idx} '{spec['text'][:40]}' at Y={y_pos}: {start_time:.3f}s-{end_time:.3f}s (original: {original_start:.3f}s-{original_end:.3f}s)")
+        
+        # Rebuild calculated_timings in original order
+        # Mark skipped indices from subset detection as skipped
+        calculated_timings = []
+        for i in range(len(sorted_specs)):
+            if i in skip_indices:
+                # Mark as skipped due to subset overlap
+                calculated_timings.append({
+                    'start_time': sorted_specs[i]['start_time'],
+                    'end_time': sorted_specs[i]['end_time'],
+                    'skip': True
+                })
+            else:
+                # Use timing from map, or default if not in map
+                calculated_timings.append(timing_map.get(i, {
+                    'start_time': sorted_specs[i]['start_time'],
+                    'end_time': sorted_specs[i]['end_time'],
+                    'skip': False
+                }))
+        
+        # Second pass: Create clips with resolved timings
         for i, spec in enumerate(sorted_specs):
             try:
+                # Skip if marked for skipping
+                if calculated_timings[i]['skip']:
+                    logger.debug(f"Skipping clip {i} '{spec['text']}' due to timing constraints")
+                    continue
+                
                 caption_text = spec['text']
                 
-                # Calculate timing (shared for base and overlay clips)
-                start_time = spec['start_time']
-                if i > 0:
-                    prev_end = sorted_specs[i - 1]['start_time'] + (sorted_specs[i - 1]['end_time'] - sorted_specs[i - 1]['start_time'])
-                    if start_time < prev_end:
-                        start_time = prev_end
-                
-                if i < len(sorted_specs) - 1:
-                    next_start = sorted_specs[i + 1]['start_time']
-                    end_time = next_start
-                else:
-                    end_time = spec['end_time']
-                
-                min_duration = 0.120
-                actual_duration = end_time - start_time
-                if actual_duration < min_duration:
-                    end_time = start_time + min_duration
+                # Use calculated timings (guaranteed no overlaps)
+                start_time = calculated_timings[i]['start_time']
+                end_time = calculated_timings[i]['end_time']
                 
                 # Extract Y position safely
                 if isinstance(spec['position'], tuple) and len(spec['position']) == 2:
@@ -376,6 +563,10 @@ def run_moviepy_builder(video_path: str, subtitle_path: str, output_path: str, l
                     base_clip = base_clip.with_position(('center', base_y))
                     base_clip = base_clip.with_start(start_time).with_end(end_time)
                     text_clips.append(base_clip)
+                    
+                    # DISABLED: Overlay/layered captions cause double-word visual overlap issues
+                    # Only create base captions - no overlay clips for "wow words"
+                    # This prevents the "LLastGuest" double-word issue
                     logger.info(f"Created base caption: '{caption_text}' at {start_time:.3f}s to {end_time:.3f}s")
                     
                 except Exception as e:
@@ -384,93 +575,111 @@ def run_moviepy_builder(video_path: str, subtitle_path: str, output_path: str, l
                     logger.error(traceback.format_exc())
                     continue
                 
-                # Detect wow words in this caption
-                wow_positions = detect_wow_words_in_text(caption_text, wow_words)
-                
-                if wow_positions and extrabold_font and os.path.exists(extrabold_font):
-                    # Create overlay clips for wow words
-                    overlay_info = []
-                    
-                    for word_index, original_word, clean_word in wow_positions:
-                        try:
-                            # Estimate word position
-                            word_x, word_text = estimate_word_x_position(caption_text, word_index, spec['font_size'])
-                            
-                            # Create wow word overlay clip - use margins like base
-                            overlay_font_size = int(spec['font_size'] * 1.1)
-                            overlay_vertical_margin = int(overlay_font_size * 0.5)
-                            overlay_horizontal_margin = 10
-                            
-                            overlay_kwargs = {
-                                'text': original_word,
-                                'font_size': overlay_font_size,
-                                'color': spec['font_color'],
-                                'font': extrabold_font,
-                                'method': 'caption',  # Use caption method for proper rendering
-                                'text_align': 'center',  # Use text_align instead of align
-                                'margin': (overlay_horizontal_margin, overlay_vertical_margin),  # Add margins
-                                'stroke_color': 'black',
-                                'stroke_width': 2,
-                            }
-                            
-                            try:
-                                overlay_clip = TextClip(**overlay_kwargs)
-                                overlay_clip = overlay_clip.with_position((word_x, base_y))
-                                overlay_clip = overlay_clip.with_duration(end_time - start_time)
-                                overlay_clip = overlay_clip.with_start(start_time)
-                                text_clips.append(overlay_clip)
-                            except Exception as e:
-                                # Fallback: try with label method and margins
-                                logger.warning(f"Overlay caption failed, trying label with margins: {e}")
-                                overlay_kwargs['method'] = 'label'
-                                try:
-                                    overlay_clip = TextClip(**overlay_kwargs)
-                                    overlay_clip = overlay_clip.with_position((word_x, base_y))
-                                    overlay_clip = overlay_clip.with_duration(end_time - start_time)
-                                    overlay_clip = overlay_clip.with_start(start_time)
-                                    text_clips.append(overlay_clip)
-                                except Exception as e2:
-                                    # Final fallback: label without margins
-                                    logger.warning(f"Overlay label with margins failed, trying without: {e2}")
-                                    overlay_kwargs.pop('margin', None)
-                                    overlay_clip = TextClip(**overlay_kwargs)
-                                    overlay_clip = overlay_clip.with_position((word_x, base_y))
-                                    overlay_clip = overlay_clip.with_duration(end_time - start_time)
-                                    overlay_clip = overlay_clip.with_start(start_time)
-                                    text_clips.append(overlay_clip)
-                            
-                            overlay_info.append(f"{original_word}(ExtraBold@{word_x:.0f}px)")
-                            
-                        except Exception as e:
-                            logger.warning(f"Failed to create overlay for '{original_word}': {e}")
-                    
-                    if overlay_info:
-                        logger.info(f"Created layered caption: '{caption_text}' with overlays: {', '.join(overlay_info)} at {start_time:.3f}s to {end_time:.3f}s")
-                    else:
-                        logger.info(f"Created base caption: '{caption_text}' at {start_time:.3f}s to {end_time:.3f}s")
-                else:
-                    logger.info(f"Created base caption: '{caption_text}' at {start_time:.3f}s to {end_time:.3f}s")
-                
             except Exception as e:
                 logger.warning(f"Failed to create text clip for '{spec['text']}': {e}")
                 continue
         
         logger.info(f"Successfully created {len(text_clips)} text clips")
         
-        # Validate no overlapping captions
+        # Validate no overlapping BASE captions at the same Y position
+        # Overlay clips are INTENDED to overlap with base clips (they're layered on top)
+        # Only BASE clips at the SAME Y position should not overlap with each other
         logger.info("Validating caption timing...")
         overlapping_found = False
-        for i in range(len(text_clips) - 1):
-            current_end = text_clips[i].start + text_clips[i].duration
-            next_start = text_clips[i + 1].start
-            if current_end > next_start:
-                logger.warning(f"Overlap detected: clip {i} ends at {current_end:.3f}s, clip {i+1} starts at {next_start:.3f}s")
-                overlapping_found = True
+        overlap_details = []
+        
+        # Extract Y positions and identify base vs overlay clips
+        # Base clips are centered horizontally ('center' in X position)
+        # Overlay clips have specific X coordinates (not 'center')
+        clip_info = []
+        for i, clip in enumerate(text_clips):
+            try:
+                if callable(clip.pos):
+                    pos = clip.pos(0)  # Evaluate at t=0
+                else:
+                    pos = clip.pos
+                
+                if isinstance(pos, (tuple, list)) and len(pos) > 1:
+                    x_pos = pos[0]
+                    y_pos = pos[1]
+                elif isinstance(pos, (int, float)):
+                    x_pos = None
+                    y_pos = pos
+                else:
+                    x_pos = None
+                    y_pos = None
+                
+                # Identify if this is a base clip (centered) or overlay (specific X position)
+                # Base clips use 'center' for X, overlays use numeric X coordinates
+                is_base_clip = (x_pos == 'center' or (isinstance(x_pos, str) and 'center' in str(x_pos).lower()))
+                
+                clip_info.append({
+                    'index': i,
+                    'clip': clip,
+                    'x_pos': x_pos,
+                    'y_pos': y_pos,
+                    'is_base': is_base_clip,
+                    'start': clip.start,
+                    'end': clip.start + clip.duration,
+                    'duration': clip.duration
+                })
+            except Exception as e:
+                logger.debug(f"Could not extract position for clip {i}: {e}")
+                clip_info.append({
+                    'index': i,
+                    'clip': clip,
+                    'x_pos': None,
+                    'y_pos': None,
+                    'is_base': True,  # Assume base if we can't determine
+                    'start': clip.start,
+                    'end': clip.start + clip.duration,
+                    'duration': clip.duration
+                })
+        
+        # Group base clips by Y position and check for overlaps
+        # Ignore overlay clips in overlap detection (they're supposed to overlap with base)
+        base_clips_by_y = {}
+        for info in clip_info:
+            if info['is_base'] and info['y_pos'] is not None:
+                y_pos = info['y_pos']
+                if y_pos not in base_clips_by_y:
+                    base_clips_by_y[y_pos] = []
+                base_clips_by_y[y_pos].append(info)
+        
+        # Check for overlaps between base clips at the same Y position
+        for y_pos, base_clips in base_clips_by_y.items():
+            # Sort by start time
+            base_clips_sorted = sorted(base_clips, key=lambda x: x['start'])
+            
+            # Check consecutive base clips for overlaps
+            for j in range(len(base_clips_sorted) - 1):
+                clip1 = base_clips_sorted[j]
+                clip2 = base_clips_sorted[j + 1]
+                
+                # Check if clip1 ends after clip2 starts (overlap)
+                if clip1['end'] > clip2['start']:
+                    # Real overlap between base clips - this is a problem!
+                    overlap_details.append({
+                        'y_pos': y_pos,
+                        'clip1_idx': clip1['index'],
+                        'clip1_start': clip1['start'],
+                        'clip1_end': clip1['end'],
+                        'clip1_duration': clip1['duration'],
+                        'clip2_idx': clip2['index'],
+                        'clip2_start': clip2['start'],
+                        'clip2_end': clip2['end'],
+                        'clip2_duration': clip2['duration']
+                    })
+                    overlapping_found = True
+                    logger.warning(f"Overlap detected at Y={y_pos}: base clip {clip1['index']} ({clip1['start']:.3f}s-{clip1['end']:.3f}s, dur={clip1['duration']:.3f}s) overlaps with base clip {clip2['index']} ({clip2['start']:.3f}s-{clip2['end']:.3f}s, dur={clip2['duration']:.3f}s)")
         
         if not overlapping_found:
-            logger.info("[OK] No overlapping captions detected")
+            logger.info("[OK] No overlapping base captions detected at same level")
         else:
-            logger.warning("[WARNING] Some caption overlaps detected - this may cause double text")
+            logger.error(f"[ERROR] {len(overlap_details)} base caption overlap(s) detected at same level - this will cause double text!")
+            # Log overlap details for debugging
+            for overlap in overlap_details:
+                logger.error(f"  Overlap at Y={overlap['y_pos']}: clip {overlap['clip1_idx']} ({overlap['clip1_start']:.3f}s-{overlap['clip1_end']:.3f}s) overlaps with clip {overlap['clip2_idx']} ({overlap['clip2_start']:.3f}s-{overlap['clip2_end']:.3f}s)")
         
         # Composite video
         logger.info("Compositing video with text clips...")

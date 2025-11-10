@@ -240,21 +240,57 @@ class CaptionGenerator:
         
         return word_times
     
-    def determine_word_count(self, word_index: int, total_words: int, avg_time_per_word: float) -> int:
-        """Determine how many words to show (cycles through 1-3 based on timing)"""
+    def determine_word_count(self, word_index: int, total_words: int, segment_duration: float, 
+                             words_in_segment: int, caption_text: str = "") -> int:
+        """Determine how many words to show based on speaking rate (words per second)"""
         remaining_words = total_words - word_index
         
-        # If speech is very fast, show fewer words
-        if avg_time_per_word < self.min_visibility_sec / 2:
-            return min(1, remaining_words)
-        elif avg_time_per_word < self.min_visibility_sec:
-            return min(2, remaining_words)
+        # Compute words per second (wps) for this segment
+        wps = words_in_segment / segment_duration if segment_duration > 0 else 3.0
         
-        # Normal speech: cycle through 1, 2, 3, 1, 2, 3, ...
-        # This creates a natural rhythm
-        cycle_pos = word_index % 3
-        word_count = self.min_words + cycle_pos
-        word_count = min(word_count, self.max_words, remaining_words)
+        # Determine base chunk size based on speaking rate
+        # Fast > 3.2 wps: 1-2 words (prefer 2)
+        # Normal 2.2-3.2 wps: 2 words (occasionally 3)
+        # Slow < 2.2 wps: 2-3 words
+        if wps > 3.2:
+            # Fast speech: prefer 2, fall back to 1 if needed
+            base_size = 2
+            if remaining_words == 1:
+                base_size = 1
+            elif word_index % 3 == 0:  # Every 3rd position, use 1 word for variety
+                base_size = 1
+        elif wps >= 2.2:
+            # Normal speech: prefer 2, occasionally 3
+            base_size = 2
+            # Sprinkle in 3-word chunks every 4th position for variety
+            if word_index % 4 == 2 and remaining_words >= 3:
+                base_size = 3
+        else:
+            # Slow speech: prefer 3, fall back to 2
+            base_size = 3
+            # Every 3rd position, use 2 words for variety
+            if word_index % 3 == 1:
+                base_size = 2
+        
+        word_count = min(base_size, self.max_words, remaining_words)
+        
+        # Line length sanity: 3-word chunks only when ≤18-20 chars
+        if word_count == 3 and caption_text:
+            if len(caption_text) > 20:
+                word_count = min(2, remaining_words)
+        
+        # Ensure minimum visibility: check if there's enough time
+        avg_time_per_word = segment_duration / words_in_segment if words_in_segment > 0 else self.min_visibility_sec
+        min_time_for_caption = self.min_visibility_sec
+        
+        if word_count == 3:
+            # For 3 words, need at least min_visibility total
+            if avg_time_per_word * 3 < min_time_for_caption:
+                word_count = min(2, remaining_words)
+        elif word_count == 2:
+            # For 2 words, need at least min_visibility total
+            if avg_time_per_word * 2 < min_time_for_caption:
+                word_count = min(1, remaining_words)
         
         # Ensure we show at least min_words if possible
         if word_count < self.min_words and remaining_words >= self.min_words:
@@ -284,15 +320,14 @@ class CaptionGenerator:
             word_times = self.compute_word_times(adj_start, adj_end, len(words))
             total_duration = adj_end - adj_start
             
-            # Calculate average time per word for timing-based decisions
-            avg_time_per_word = total_duration / len(words) if len(words) > 0 else self.min_visibility_sec
-            
-            # Process words in groups of 1-3
+            # Process words in groups of 1-3 based on speaking rate
             i = 0
             while i < len(words):
-                # Determine how many words to show in this caption
-                # Cycles through 1, 2, 3, 1, 2, 3... based on timing constraints
-                word_count = self.determine_word_count(i, len(words), avg_time_per_word)
+                # Determine how many words to show based on speaking rate (wps)
+                # First pass: determine word count without text check
+                word_count = self.determine_word_count(
+                    i, len(words), total_duration, len(words), ""
+                )
                 
                 # Ensure we don't exceed remaining words
                 word_count = min(word_count, len(words) - i)
@@ -300,6 +335,12 @@ class CaptionGenerator:
                 # Get the words for this caption
                 caption_words = words[i:i + word_count]
                 caption_text = ' '.join(caption_words)
+                
+                # Line length sanity: 3-word chunks only when ≤18-20 chars
+                if word_count == 3 and len(caption_text) > 20:
+                    word_count = min(2, len(words) - i)
+                    caption_words = words[i:i + word_count]
+                    caption_text = ' '.join(caption_words)
                 
                 # Compute timing: start when first word appears, end when last word finishes
                 if i < len(word_times):

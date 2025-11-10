@@ -4,8 +4,8 @@ A sophisticated algorithm that renders progressive 1-3 word captions for 9:16 vi
 
 ## 🎯 Features
 
-- **1-3 Word Captions**: Cycles through 1, 2, 3 word captions as words are spoken
-- **Precise Timing**: 200ms minimum visibility per caption, smart timing based on speech rate
+- **1-3 Word Captions**: Rate-aware adaptive chunking (1-2 words for fast speech, 2-3 words for slow speech)
+- **Precise Timing**: 200ms minimum visibility per caption, smart timing based on speaking rate (words per second)
 - **Smart Layout**: Auto-wrapping within 90% width, center-aligned, professional positioning
 - **Multi-Format Support**: Parses ASS, SRT, and VTT subtitle files
 - **Dynamic Styling**: Automatic font and color styling based on content
@@ -106,11 +106,16 @@ generator = CaptionGenerator(
 - Enforces minimum 200ms per word group
 - Clamps to segment boundaries
 
-### 3. Caption State Generation
-- Cycles through 1-3 word captions (1, 2, 3, 1, 2, 3...)
-- Adjusts word count based on speech rate
-- Applies timing constraints
-- Maintains minimum 200ms visibility per caption
+### 3. Caption State Generation (Rate-Aware)
+- **Speaking Rate Detection**: Calculates words per second (wps) for each segment
+- **Adaptive Chunk Sizing**:
+  - **Fast speech** (>3.2 wps): 1-2 words per chunk (prefer 2)
+  - **Normal speech** (2.2-3.2 wps): 2 words per chunk (occasionally 3)
+  - **Slow speech** (<2.2 wps): 2-3 words per chunk (prefer 3)
+- **Smart Grouping**: Prefers 2-word chunks as default for optimal rhythm and readability
+- **Line Length Safety**: 3-word chunks only when total ≤20 characters to prevent wrapping
+- **Timing Constraints**: Maintains minimum 200ms visibility per caption
+- **Phrase Integrity**: Keeps related words together (e.g., "red carpet", "look at")
 
 ### 4. Layout & Level Assignment
 - **Primary Level**: y = h-260 (260px from bottom)
@@ -133,14 +138,20 @@ generator = CaptionGenerator(
 
 **Input**: "This room is like a red carpet Hollywood hallway." (9 words)
 
-**Generated Captions**:
-1. "This" (1 word, default style)
-2. "room is" (2 words, default style)
-3. "like a" (2 words, italic style - contains "like")
-4. "red carpet" (2 words, default style)
-5. "Hollywood hallway." (2 words, default style)
+**Generated Captions** (example for normal speech rate):
+1. "This room" (2 words, default style)
+2. "is like" (2 words, italic style - contains "like")
+3. "a red" (2 words, default style)
+4. "carpet Hollywood" (2 words, default style)
+5. "hallway." (1 word, default style)
 
-Note: The actual output depends on timing and speech rate, cycling through 1-3 words.
+**For slow speech**, you might see:
+1. "This room is" (3 words, default style)
+2. "like a red" (3 words, italic style)
+3. "carpet Hollywood" (2 words, default style)
+4. "hallway." (1 word, default style)
+
+Note: The actual output adapts to speaking rate (words per second), with 2-word chunks as the default for optimal readability.
 
 ## 🎨 Visual Features
 
